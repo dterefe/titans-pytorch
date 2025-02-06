@@ -148,7 +148,7 @@ class MultiheadRMSNorm(Module):
     def __init__(self, dim, heads):
         super().__init__()
         self.rmsnorm = nn.RMSNorm(dim, elementwise_affine = False)
-        self.gamma = Parameter(torch.zeros(heads, 1, dim))
+        self.gamma = Parameter(torch.zeros(1, 1, dim))
 
     def forward(self, x):
         return self.rmsnorm(x) * (self.gamma + 1.)
