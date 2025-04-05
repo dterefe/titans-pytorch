@@ -34,6 +34,7 @@ def torch_default_dtype(dtype):
 @pytest.mark.parametrize('num_kv_per_token', (1, 2))
 @pytest.mark.parametrize('per_parameter_lr_modulation', (False, True))
 @pytest.mark.parametrize('per_head_learned_parameters', (False, True))
+@pytest.mark.parametrize('test_store_mask', (False, True))
 def test_titans(
     seq_len,
     silu,
@@ -45,7 +46,8 @@ def test_titans(
     max_grad_norm,
     num_kv_per_token,
     per_parameter_lr_modulation,
-    per_head_learned_parameters
+    per_head_learned_parameters,
+    test_store_mask
 ):
     mem = NeuralMemory(
         dim = 16,
@@ -62,9 +64,30 @@ def test_titans(
     )
 
     seq = torch.randn(2, seq_len, 16)
-    retrieved, _ = mem(seq)
+
+    store_mask = None
+
+    if test_store_mask:
+        store_mask = torch.randint(0, 2, (2, seq_len)).bool()
+
+    retrieved, _ = mem(seq, store_mask = store_mask)
 
     assert seq.shape == retrieved.shape
+
+def test_return_surprises():
+
+    mem = NeuralMemory(
+        dim = 384,
+        chunk_size = 2,
+        dim_head = 64,
+        heads = 4,
+    )
+
+    seq = torch.randn(4, 64, 384)
+
+    _, _, (surprises, adaptive_lr) = mem(seq, return_surprises = True)
+
+    assert all([t.shape == (4, 4, 64) for t in (surprises, adaptive_lr)])
 
 @pytest.mark.parametrize('learned_momentum_combine', (False, True))
 @pytest.mark.parametrize('learned_combine_include_zeroth', (False, True))
@@ -382,3 +405,23 @@ def test_assoc_scan(
     assert second_half.shape == inputs2.shape
 
     assert torch.allclose(output[:, -1], second_half[:, -1], atol = 1e-5)
+
+def test_mem_state_detach():
+    from titans_pytorch.neural_memory import mem_state_detach
+
+    mem = NeuralMemory(
+        dim = 384,
+        chunk_size = 2,
+        qk_rmsnorm = True,
+        dim_head = 64,
+        heads = 4,
+    )
+
+    seq = torch.randn(4, 64, 384)
+
+    state = None
+
+    for _ in range(2):
+        parallel_retrieved, state = mem(seq, state = state)
+        state = mem_state_detach(state)
+        parallel_retrieved.sum().backward()
